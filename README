@@ -24,16 +24,23 @@ DESCRIPTION
     find it useful.
 
 NOTES
+    This module is designed to work with both ASP PerlScript on
+    IIS4, as well as mod_perl/Apache::ASP on *nix platforms.
+    Apache::ASP already provides some of the functionality provided
+    by this module; because of this (and to avoid redundancy),
+    ASP.pm attempts to detect its environment. Differences between
+    Apache and MS ASP are noted.
+
     Both of the print() and warn() standard perl funcs are
     overloaded to output to the browser. print() is also available
     via the $ASP::ASPOUT->print() method call.
 
-    $Request->ServerVariables are stuffed in %ENV to more closely
-    resemble CGI.pm
+    $Request->ServerVariables are only stuffed into %ENV on Win32
+    platforms, as Apache::ASP already provides this.
 
-    ASP.pm now exports the $ScriptingNamespace symbol. This symbol
-    allows PerlScript to call subs/functions written in another
-    script language. For example:
+    ASP.pm also exports the $ScriptingNamespace symbol (Win32 only).
+    This symbol allows PerlScript to call subs/functions written in
+    another script language. For example:
 
         <%@ language=PerlScript %>
         <%
@@ -46,15 +53,11 @@ NOTES
         End Function
         </SCRIPT>
 
-INSTALLATION
-    This module can be installed via my PPM repository at
-
-       http://dichosoft.com/perl
-
 USE
   use ASP qw(:basic);
 
     Exports basic subs: Print, Warn, die, exit, param, param_count.
+    Same as `use ASP;'
 
   use ASP qw(:strict);
 
@@ -65,8 +68,7 @@ USE
 
   use ASP qw(:all);
 
-    Same as `use ASP;'. Exports all subs except those marked 'not
-    exported'.
+    Exports all subs except those marked 'not exported'.
 
   use ASP ();
 
@@ -81,6 +83,12 @@ FUNCTION REFERENCE
 
     FYI: When implemented, this tweak led to the removal of the
     prototypes Matt placed on his subs.
+
+  Warn LIST
+
+    `Warn' is an alias for the ASP::Print method described below.
+    The overloading of `warn' as described above does not currently
+    work in Apache::ASP, so this is provided.
 
   print LIST
 
@@ -153,111 +161,96 @@ FUNCTION REFERENCE
 
   param EXPR [, EXPR]
 
-        Simplifies parameter access and makes switch from GET to
-        POST transparent.
+    Simplifies parameter access and makes switch from GET to POST
+    transparent.
 
-        Given the following querystring:
+    Given the following querystring:
 
-                myscript.asp?x=a&x=b&y=c
+            myscript.asp?x=a&x=b&y=c
 
-            param()      returns ('x', 'y')
-            param('y')   returns 'c'
-            param('x')   returns ('a', 'b')
-            param('x',1) returns 'a'
-            param('x',2) returns 'b'
+        param()      returns ('x', 'y')
+        param('y')   returns 'c'
+        param('x')   returns ('a', 'b')
+        param('x',1) returns 'a'
+        param('x',2) returns 'b'
+
+    NOTE: Under Apache::ASP, param() simply passes the arguments to
+    CGI::param() because Apache::ASP doesn't support the $obj-
+    >{Count} property used in this function.
 
   param_count EXPR
 
-        Returns the number of times EXPR appears in the request
-        (Form or QueryString).
+    Returns the number of times EXPR appears in the request (Form or
+    QueryString).
 
-        For example, if URL is
+    For example, if URL is
 
-                myscript.asp?x=a&x=b&y=c
+            myscript.asp?x=a&x=b&y=c
 
-        then
+    then
 
-                param_count('x');
+            param_count('x');
 
-        returns 2.
+    returns 2.
+
+    NOTE: Under Apache::ASP, param_count() performs some
+    manipulation using CGI::param() because Apache::ASP doesn't
+    support the $obj->{Count} property used in this function.
 
   AddDeathHook LIST
 
-        Allows cleanup code to be executed when you `die' or `exit'.
-        Useful for closing database connections in the event of a
-        fatal error.
+    Allows cleanup code to be executed when you `die' or `exit'.
+    Useful for closing database connections in the event of a fatal
+    error.
 
-                <%
-                my $conn = Win32::OLE-new('ADODB.Connection');
-                $conn->Open("MyDSN");
-                $conn->BeginTrans();
-                ASP::AddDeathHook( sub { $Conn->Close if $Conn; } );
-                %>
+            <%
+            my $conn = Win32::OLE-new('ADODB.Connection');
+            $conn->Open("MyDSN");
+            $conn->BeginTrans();
+            ASP::AddDeathHook( sub { $Conn->Close if $Conn; } );
+            %>
 
-        Death hooks should be executed on a graceful exit of the
-        script too but this hasn't been confirmed. If anyone has any
-        luck, let me know.
+    Death hooks are not executed except by explicitly calling the
+    die() or exit() methods provided by ASP.pm.
 
-        AddDeathHook is not exported.
-
-  BinaryWrite LIST
-
-        Performs the same function as $Response->BinaryWrite() but
-        gets around Perl's lack of unicode support, and the null
-        padding it uses to get around this. Example:
-
-                ASP::BinaryWrite($val);
-
-        BinaryWrite is not exported.
-
-  SetCookie Name, Value [, HASH]
-
-        Sets the cookie Name with the value Value. HASH is optional,
-        and contains any of the following optional parameters:
-
-            -expires => CGI.pm style expires value
-            -domain => domain that the cookie is returned to; eg, ".domain.com"
-            -path => a path that the cookie is returned to.
-            -secure => cookie only returned under SSL if true.
-
-        If Value is a hash ref, then it creates a cookie dictionary.
-        (see either the ASP docs, or my Introduction to PerlScript
-        for more info on Cookie Dictionaries).
-
-        Example:
-
-                ASP::SetCookie("Options", { bg=>'white', text=>'black' }, (
-                    -expires => "+3h",
-                    -domain => ".dichosoft.com",
-                    -path => "/perl",
-                    -secure => 0 )
-                    );
-
-        SetCookie is not exported.
+    AddDeathHook is not exported.
 
 AUTHOR
-        Tim Hammerquist <tim@dichosoft.com>
+    Tim Hammerquist <tim@dichosoft.com>
 
 HISTORY
+    Version 1.07
+        Added Warn() because warn() overloading doesn't appear to
+        work under Apache::ASP.
+
+        Was forced to clear @DeathHooks array after calling _END()
+        because of the persistent state of Apache::ASP holding over
+        contents across executions.
+
+        Removed BinaryWrite(), SetCookie(), and Autoload
+        functionality.
+
     Version 1.00
-            The escapeHTML() and unescapeHTML() functions now accept
-            array refs as well as lists, as Win32::ASP::HTMLEncode()
-            was supposed to. Thanks to Matt Sergeant for the fix.
+        The escapeHTML() and unescapeHTML() functions now accept
+        array refs as well as lists, as Win32::ASP::HTMLEncode() was
+        supposed to. Thanks to Matt Sergeant for the fix.
 
     Version 0.97
-            Optimized and debugged.
+        Optimized and debugged.
 
     Version 0.77
-            Overloaded warn() and subsequently removed prototypes.
+        Overloaded warn() and subsequently removed prototypes.
 
-            Exported $ScriptingNamespace object.
+        Exported $ScriptingNamespace object.
 
-            Added methods escape(), unescape(), escapeHTML(),
-            unescapeHTML(). Thanks to Bill Odom for pointing these
-            out!
+        Added methods escape(), unescape(), escapeHTML(),
+        unescapeHTML(). Thanks to Bill Odom for pointing these out!
 
-            Re-implemented SetCookie and BinaryWrite functions.
+        Re-implemented SetCookie and BinaryWrite functions.
 
     Version 0.11
-            Optimized and debugged.
+        Optimized and debugged.
+
+SEE ALSO
+    ASP::NextLink(3)
 

@@ -3,7 +3,7 @@
 # ASP - Facilitate integration of PerlScript with ASP
 #
 # Author: Tim Hammerquist
-# Revision: 1.00
+# Revision: 1.07
 # NOTES: based on Matt Sergeant's Win32-ASP module.
 #
 #####################################################################
@@ -18,7 +18,13 @@
 # flames, queries, suggestions, or general curiosity.
 #
 #####################################################################
+
+require 5.005;
 use strict;
+
+my ($APACHE, $WIN32);
+$APACHE	= $Apache::ASP::VERSION; 
+$WIN32	= $^O =~ /win/i;
 
 package ASP::IO;
 sub TIEHANDLE	{ shift->new(@_) }
@@ -34,30 +40,31 @@ sub print {
 1;
 
 package ASP;
-use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
+use vars qw($VERSION @ISA @EXPORT @EXPORT_OK $ASPOUT);
+
+require CGI;
 
 BEGIN {
 	require Exporter;
-	require AutoLoader;
 
 	use vars qw( @ISA @EXPORT @EXPORT_OK %EXPORT_TAGS
 		$Application $ObjectContext $Request $Response
 		$Server $Session $ScriptingNamespace @DeathHooks
 		);
 
-	@ISA = qw( Exporter AutoLoader );
+	@ISA = qw( Exporter );
 	%EXPORT_TAGS =	(
 		basic => [qw(
-			Print die exit param param_count
+			Print Warn die exit param param_count
 			)],
 		strict => [qw(
-			Print die exit param param_count
+			Print Warn die exit param param_count
 			$Application $ObjectContext $Request
 			$Response $Server $Session
 			$ScriptingNamespace
 			)],
 		all => [qw(
-			Print die exit param param_count
+			Print Warn die exit param param_count
 			$Application $ObjectContext $Request
 			$Response $Server $Session
 			$ScriptingNamespace
@@ -65,7 +72,7 @@ BEGIN {
 			escape unescape escapeHTML unescapeHTML
 			)],
 	);
-	Exporter::export_tags('all');
+	Exporter::export_tags('basic');
 	Exporter::export_ok_tags('all');
 
 	$Application = $main::Application;
@@ -74,27 +81,23 @@ BEGIN {
 	$Response = $main::Response;
 	$Server = $main::Server;
 	$Session = $main::Session;
-	$ScriptingNamespace = $main::ScriptingNamespace;
+	$ScriptingNamespace = $main::ScriptingNamespace unless $APACHE;
 
-	%ENV = ();
-	use Sys::Hostname;
-	$ENV{HOST_NAME} = hostname;
-	$ENV{HOST_IP} = join '.', unpack "C4", gethostbyname hostname;
-	for (Win32::OLE::in( $Request->ServerVariables )) {
-		$ENV{$_} = $Request->ServerVariables($_)->Item;
+	if ($WIN32) {
+		%ENV = ();
+		for (Win32::OLE::in $Request->ServerVariables) {
+			$ENV{$_} = $Request->ServerVariables($_)->Item;
+		}
 	}
 }
 
-$VERSION='1.00';
+$VERSION='1.07';
 
-my $ASPOUT = tie *RESPONSE_FH, 'ASP::IO';
-select RESPONSE_FH;
+$ASPOUT = tie *RESPONSE_FH, 'ASP::IO';
+select RESPONSE_FH unless $APACHE;
 $SIG{__WARN__} = sub { ASP::Print(@_) };
 
-sub _END { map { &$_() } @DeathHooks; }
-
-1;
-__END__
+sub _END { &$_() for  @DeathHooks; @DeathHooks = (); 1; }
 
 =head1 NAME
 
@@ -126,16 +129,22 @@ free to use it if you find it useful.
 
 =head1 NOTES
 
+This module is designed to work with both ASP PerlScript on IIS4,
+as well as mod_perl/Apache::ASP on *nix platforms. Apache::ASP
+already provides some of the functionality provided by this module;
+because of this (and to avoid redundancy), ASP.pm attempts to detect
+its environment. Differences between Apache and MS ASP are noted.
+
 Both of the print() and warn() standard perl funcs are overloaded
 to output to the browser. print() is also available via the
 $ASP::ASPOUT->print() method call.
 
-$Request->ServerVariables are stuffed in %ENV
-to more closely resemble CGI.pm
+$Request->ServerVariables are only stuffed into %ENV on Win32
+platforms, as Apache::ASP already provides this.
 
-ASP.pm now exports the $ScriptingNamespace symbol. This symbol
-allows PerlScript to call subs/functions written in another script
-language. For example:
+ASP.pm also exports the $ScriptingNamespace symbol (Win32 only).
+This symbol allows PerlScript to call subs/functions written in
+another script language. For example:
 
     <%@ language=PerlScript %>
     <%
@@ -148,17 +157,12 @@ language. For example:
     End Function
     </SCRIPT>
 
-=head1 INSTALLATION
-
-This module can be installed via my PPM repository at
-
-   http://dichosoft.com/perl
-
 =head1 USE
 
 =head2 use ASP qw(:basic);
 
-Exports basic subs: Print, Warn, die, exit, param, param_count.
+Exports basic subs: Print, Warn, die, exit, param, param_count. Same
+as C<use ASP;>
 
 =head2 use ASP qw(:strict);
 
@@ -169,7 +173,7 @@ the cleanest, most convenient way.
 
 =head2 use ASP qw(:all);
 
-Same as C<use ASP;>. Exports all subs except those marked 'not exported'.
+Exports all subs except those marked 'not exported'.
 
 =head2 use ASP ();
 
@@ -184,6 +188,15 @@ output to the browser.
 
 FYI: When implemented, this tweak led to the removal of the prototypes
 Matt placed on his subs.
+
+=head2 Warn LIST
+
+C<Warn> is an alias for the ASP::Print method described below. The
+overloading of C<warn> as described above does not currently work
+in Apache::ASP, so this is provided.
+
+=cut
+sub Warn { ASP::Print(@_); }
 
 =head2 print LIST
 
@@ -229,7 +242,7 @@ The same as C<Print> except the output is HTML-encoded so that
 any HTML tags appear as sent, i.e. E<lt> becomes &lt;, E<gt> becomes &gt; etc.
 
 =cut
-sub HTMLPrint { map { ASP::Print($Server->HTMLEncode($_)) } @_ ; }
+sub HTMLPrint { map { ASP::Print($main::Server->HTMLEncode($_)) } @_ ; }
 
 =head2 die LIST
 
@@ -263,7 +276,7 @@ Escapes (URL-encodes) a list. Uses ASP object method
 $Server->URLEncode().
 
 =cut
-sub escape { map { $Server->URLEncode($_) } @_; }
+sub escape { map { $main::Server->URLEncode($_) } @_; }
 
 =head2 unescape LIST
 
@@ -289,7 +302,7 @@ to the escaped array.
 sub escapeHTML {
 	my ($flag, @args) = (0, @_);
 	@args = @{$args[0]} and $flag++ if ref $args[0] eq "ARRAY"; 
-	map { $_ = $Server->HTMLEncode($_) } @args;
+	$_ = $main::Server->HTMLEncode($_) for @args;
 	$flag ? \@args : @args;
 }
 
@@ -312,13 +325,11 @@ sub unescapeHTML {
 		s/&lt;/</gi;
 		s/&#(\d+);/chr($1)/ge;
 		s/&#x([0-9a-f]+);/chr(hex($1))/gi;
-	} @args
+	} @args;
 	$flag ? \@args : @args;
 }
 
 =head2 param EXPR [, EXPR]
-
-=over 4
 
 Simplifies parameter access and makes switch from GET to POST transparent.
 
@@ -332,8 +343,15 @@ Given the following querystring:
     param('x',1) returns 'a'
     param('x',2) returns 'b'
 
+NOTE: Under Apache::ASP, param() simply passes the arguments
+to CGI::param() because Apache::ASP doesn't support the $obj->{Count}
+property used in this function.
+
 =cut
 sub param {
+	if ($APACHE) {
+		return (wantarray) ? (CGI::param(@_)) : scalar(CGI::param(@_));
+	}
 	unless (@_) {
 		my @keys;
 		push( @keys, $_ ) for ( Win32::OLE::in $main::Request->QueryString );
@@ -342,14 +360,14 @@ sub param {
 	}
 	$_[1] = 1 unless defined $_[1];
 	unless (wantarray) {
-		if ($main::ENV{'REQUEST_METHOD'} eq 'GET') {
+		if ($main::Request->ServerVariables('REQUEST_METHOD')->Item eq 'GET') {
 			return $main::Request->QueryString($_[0])->Item($_[1]);
 		} else {
 			return $main::Request->Form($_[0])->Item($_[1]);
 		}
 	} else {
 		my ($i, @ret);
-		if ($main::ENV{'REQUEST_METHOD'} eq 'GET') {
+		if ($main::Request->ServerVariables('REQUEST_METHOD')->Item eq 'GET') {
 			my $count = $main::Request->QueryString($_[0])->{Count};
 			for ($i = 1; $i <= $count; $i++ ) {
 				push @ret, $main::Request->QueryString($_[0])->Item($i);
@@ -379,9 +397,18 @@ then
 
 returns 2.
 
+NOTE: Under Apache::ASP, param_count() performs some manipulation
+using CGI::param() because Apache::ASP doesn't support the
+$obj->{Count} property used in this function.
+
+ 
+
 =cut
 sub param_count {
-	if ($main::('REQUEST_METHOD')->Item eq 'GET') {
+	if ($APACHE) {
+		return scalar( @{[ CGI::param($_[0]) ]} );
+	}
+	if ($main::Request->ServerVariables('REQUEST_METHOD')->Item eq 'GET') {
 		return $main::Request->QueryString($_[0])->{Count};
 	} else {
 		return $main::Request->Form($_[0])->{Count};
@@ -401,37 +428,13 @@ fatal error.
 	ASP::AddDeathHook( sub { $Conn->Close if $Conn; } );
 	%>
 
-Death hooks should be executed on a graceful exit of the script too
-but this hasn't been confirmed. If anyone has any luck, let me know.
+Death hooks are not executed except by explicitly calling the die() or exit()
+methods provided by ASP.pm.
 
 AddDeathHook is not exported.
 
 =cut
 sub AddDeathHook { push @DeathHooks, @_; }
-
-=head2 BinaryWrite LIST
-
-Performs the same function as $Response->BinaryWrite() but gets around
-Perl's lack of unicode support, and the null padding it uses to get around
-this. Example:
-
-	ASP::BinaryWrite($val);
-
-BinaryWrite is not exported.
-
-=cut
-sub BinaryWrite {
-	use Win32::OLE::Variant;
-	for (@_) {
-		if (length($_) > 128000) {
-			BinaryWrite ( unpack('a128000a*', $_) );
-		} else {
-			$main::Response->BinaryWrite(
-				Win32::OLE::Variant->new( VT_UI1, $_ )
-			);
-		}
-	}
-}
 
 # These two functions are ripped from CGI.pm
 sub expire_calc {
@@ -464,64 +467,6 @@ sub expire_calc {
     return ($time + $offset);
 }
 
-sub date {
-	my($time,$format) = @_;
-	my(@MON)=qw/Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec/;
-	my(@WDAY) = qw/Sun Mon Tue Wed Thu Fri Sat/;
-
-	# pass through preformatted dates for the sake of expire_calc()
-	return $time if ("$time" =~ m/^[^0-9]/o);
-
-	# make HTTP/cookie date string from GMT'ed time
-	# (cookies use '-' as date separator, HTTP uses ' ')
-	my($sc) = ' ';
-	$sc = '-' if $format eq "cookie";
-	my($sec,$min,$hour,$mday,$mon,$year,$wday) = gmtime($time);
-	$year += 1900;
-	return sprintf( "%s, %02d$sc%s$sc%04d %02d:%02d:%02d GMT",
-		$WDAY[$wday], $mday, $MON[$mon], $year, $hour, $min, $sec );
-}
-
-=head2 SetCookie Name, Value [, HASH]
-
-Sets the cookie Name with the value Value. HASH is optional, and contains any of
-the following optional parameters:
-
-    -expires => CGI.pm style expires value
-    -domain => domain that the cookie is returned to; eg, ".domain.com"
-    -path => a path that the cookie is returned to.
-    -secure => cookie only returned under SSL if true.
-
-If Value is a hash ref, then it creates a cookie dictionary. (see either
-the ASP docs, or my Introduction to PerlScript for more info on Cookie
-Dictionaries).
-
-Example:
-
-	ASP::SetCookie("Options", { bg=>'white', text=>'black' }, (
-	    -expires => "+3h",
-	    -domain => ".dichosoft.com",
-	    -path => "/perl",
-	    -secure => 0 )
-	    );
-
-SetCookie is not exported.
-
-=cut
-sub SetCookie {
-	my ($name, $value, %hash) = @_;
-	if( ref($value) eq 'HASH') {
-		$value = join "&", map {$main::Server->URLEncode($_)."=".$main::Server->URLEncode($$value{$_})} keys(%$value);
-	}
-	$main::Response->AddHeader('Set-Cookie', join("",
-		"$name=$value",
-		($hash{-path} ? "; path=$hash{-path}" : ""),
-		($hash{-domain} ? "; domain=$hash{-domain}" : ""),
-		($hash{-secure} ? "; secure" : ""),
-		($hash{-expires} ? "; expires=".&date( &expire_calc( $hash{-expires} ) ) : ""),
-	) );
-}
-
 =head1 AUTHOR
 
 Tim Hammerquist E<lt>F<tim@dichosoft.com>E<gt>
@@ -529,6 +474,17 @@ Tim Hammerquist E<lt>F<tim@dichosoft.com>E<gt>
 =head1 HISTORY
 
 =over 4
+
+=item Version 1.07
+
+Added Warn() because warn() overloading doesn't appear to work
+under Apache::ASP.
+
+Was forced to clear @DeathHooks array after calling _END() because
+of the persistent state of Apache::ASP holding over contents across
+executions.
+
+Removed BinaryWrite(), SetCookie(), and Autoload functionality.
 
 =item Version 1.00
 
@@ -557,5 +513,10 @@ Optimized and debugged.
 
 =back
 
-=cut
+=head1 SEE ALSO
 
+ASP::NextLink(3)
+
+=cut
+1;
+__END__
