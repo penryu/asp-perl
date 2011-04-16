@@ -1,20 +1,20 @@
 #####################################################################
 #
-# ASP - Facilitate integration of PerlScript with ASP
+# ASP - Interface for ASP PerlScript and Apache::ASP
 #
 # Author: Tim Hammerquist
-# Revision: 1.07
+# Revision: 1.08
 # NOTES: based on Matt Sergeant's Win32-ASP module.
 #
 #####################################################################
 #
-# Copyright 2000 Tim Hammerquist.  All rights reserved.
+# Copyright 2001 Tim Hammerquist.  All rights reserved.
 #
 # This file is distributed under the Artistic License.
 # See http://www.perl.com/language/misc/Artistic.html or
 # the license that comes with your perl distribution.
 #
-# Contact me at cafall@voffice.net with any comments,
+# Contact me at timmy@cpan.org with any comments,
 # flames, queries, suggestions, or general curiosity.
 #
 #####################################################################
@@ -23,13 +23,14 @@ require 5.005;
 use strict;
 
 my ($APACHE, $WIN32);
-$APACHE	= $Apache::ASP::VERSION; 
-$WIN32	= $^O =~ /win/i;
+$APACHE = $Apache::ASP::VERSION; 
+$WIN32  = $^O =~ /win/i;
 
+# IO class for filehandle wrapper
 package ASP::IO;
-sub TIEHANDLE	{ shift->new(@_) }
-sub PRINT		{ shift->print(@_) }
-sub PRINTF		{ shift->print(sprintf(@_)) }
+sub TIEHANDLE   { shift->new(@_) }
+sub PRINT       { shift->print(@_) }
+sub PRINTF      { shift->print(sprintf(@_)) }
 sub new { bless {}, shift; }
 sub print {
     my $self = shift;
@@ -45,95 +46,103 @@ use vars qw($VERSION @ISA @EXPORT @EXPORT_OK $ASPOUT);
 require CGI;
 
 BEGIN {
-	require Exporter;
+    require Exporter;
 
-	use vars qw( @ISA @EXPORT @EXPORT_OK %EXPORT_TAGS
-		$Application $ObjectContext $Request $Response
-		$Server $Session $ScriptingNamespace @DeathHooks
-		);
+    use vars qw( @ISA @EXPORT @EXPORT_OK %EXPORT_TAGS
+        $Application $ObjectContext $Request $Response
+        $Server $Session $ScriptingNamespace @DeathHooks
+        );
 
-	@ISA = qw( Exporter );
-	%EXPORT_TAGS =	(
-		basic => [qw(
-			Print Warn die exit param param_count
-			)],
-		strict => [qw(
-			Print Warn die exit param param_count
-			$Application $ObjectContext $Request
-			$Response $Server $Session
-			$ScriptingNamespace
-			)],
-		all => [qw(
-			Print Warn die exit param param_count
-			$Application $ObjectContext $Request
-			$Response $Server $Session
-			$ScriptingNamespace
-			DebugPrint HTMLPrint
-			escape unescape escapeHTML unescapeHTML
-			)],
-	);
-	Exporter::export_tags('basic');
-	Exporter::export_ok_tags('all');
+    @ISA = qw( Exporter );
+    %EXPORT_TAGS =  (
+        basic => [qw(
+            Print Warn die exit param param_count
+            )],
+        strict => [qw(
+            Print Warn die exit param param_count
+            $Application $ObjectContext $Request
+            $Response $Server $Session
+            $ScriptingNamespace
+            )],
+        all => [qw(
+            Print Warn die exit param param_count
+            $Application $ObjectContext $Request
+            $Response $Server $Session
+            $ScriptingNamespace
+            DebugPrint HTMLPrint
+            escape unescape escapeHTML unescapeHTML
+            )],
+    );
+    Exporter::export_tags('basic');
+    Exporter::export_ok_tags('all');
 
-	$Application = $main::Application;
-	$ObjectContext = $main::ObjectContext;
-	$Request = $main::Request;
-	$Response = $main::Response;
-	$Server = $main::Server;
-	$Session = $main::Session;
-	$ScriptingNamespace = $main::ScriptingNamespace unless $APACHE;
+    $Application = $main::Application;
+    $ObjectContext = $main::ObjectContext;
+    $Request = $main::Request;
+    $Response = $main::Response;
+    $Server = $main::Server;
+    $Session = $main::Session;
+# $ScriptingNamespace var doesn't exist in Apache::ASP
+    $ScriptingNamespace = $main::ScriptingNamespace unless $APACHE;
 
-	if ($WIN32) {
-		%ENV = ();
-		for (Win32::OLE::in $Request->ServerVariables) {
-			$ENV{$_} = $Request->ServerVariables($_)->Item;
-		}
-	}
+# Fills %ENV hash with environment variables
+# Apache::ASP does this automatically
+    if ( $WIN32 && !$APACHE ) {
+        %ENV = ();
+        for (Win32::OLE::in $Request->ServerVariables) {
+            $ENV{$_} = $Request->ServerVariables($_)->Item;
+        }
+    }
 }
 
-$VERSION='1.07';
+$VERSION='2.0';
 
+# make RESPONSE_FH default for print() unless using Apache::ASP
 $ASPOUT = tie *RESPONSE_FH, 'ASP::IO';
 select RESPONSE_FH unless $APACHE;
+
+# attempt to send warn() output to browser
 $SIG{__WARN__} = sub { ASP::Print(@_) };
 
+# clear @DeathHooks on each call to _END for Apache::ASP
 sub _END { &$_() for  @DeathHooks; @DeathHooks = (); 1; }
 
 =head1 NAME
 
-ASP - a Module for ASP (PerlScript) Programming
+ASP - Interface for ASP PerlScript and Apache::ASP
 
 =head1 SYNOPSIS
 
-	use strict;
-	use ASP qw(:strict);
+    use strict;
+    use ASP qw(:strict);
 
-	print "Testing, testing.<BR><BR>";
-	my $item = param('item');
+    print "Testing, testing.<BR><BR>";
+    my $item = param('item');
 
-	if($item eq 'Select one...') {
-	    die "Please select a value from the list.";
-	}
+    if($item eq 'Select one...') {
+        die "Please select a value from the list.";
+    }
 
-	print "You selected $item.";
-	exit;
+    print "You selected $item.";
+    exit;
 
 =head1 DESCRIPTION
 
-This module is based on Matt Sergeant's excellent
-Win32::ASP module, which can be found at
-E<lt>F<http://www.fastnetltd.ndirect.co.uk/Perl>E<gt>.
-After using Mr. Sergeant's module, I took on the task of
-customizing and optimizing it for my own purposes. Feel
-free to use it if you find it useful.
+ASP.pm is a cross-platform module designed to work with both ASP
+PerlScript on IIS4, as well as mod_perl/Apache::ASP.
+
+Apache::ASP already provides some of the functionality provided by
+this module.  ASP.pm also uses some of CGI.pm's functionality to
+provide a consistent ASP.pm interface across platforms.
+
+Because of this (and to avoid redundancy), ASP.pm
+attempts to detect its environment. Differences between Apache::ASP
+and MS ASP are noted.
+
+NB: ASP.pm does not compromise the user's ability to access
+ASP objects directly.
 
 =head1 NOTES
-
-This module is designed to work with both ASP PerlScript on IIS4,
-as well as mod_perl/Apache::ASP on *nix platforms. Apache::ASP
-already provides some of the functionality provided by this module;
-because of this (and to avoid redundancy), ASP.pm attempts to detect
-its environment. Differences between Apache and MS ASP are noted.
 
 Both of the print() and warn() standard perl funcs are overloaded
 to output to the browser. print() is also available via the
@@ -189,6 +198,9 @@ output to the browser.
 FYI: When implemented, this tweak led to the removal of the prototypes
 Matt placed on his subs.
 
+WARNING: On Apache::ASP, the exported warn() function still outputs to
+the server error_log, *not* the browser. Use Warn()
+
 =head2 Warn LIST
 
 C<Warn> is an alias for the ASP::Print method described below. The
@@ -196,7 +208,9 @@ overloading of C<warn> as described above does not currently work
 in Apache::ASP, so this is provided.
 
 =cut
-sub Warn { ASP::Print(@_); }
+sub Warn {
+    ASP::Print(@_);
+}
 
 =head2 print LIST
 
@@ -204,7 +218,7 @@ C<print> is overloaded to write to the browser by default. The inherent
 behavior of print has not been altered and you can still use an alternate
 filehandle as you normally would. This allows you to use print just
 as you would in CGI scripts. The following statement would need no
-modification between CGI and ASP PerlScript:
+modification between CGI and ASP with ASP.pm:
 
     print param('URL'), " was requested by ", $ENV{REMOTE_HOST}, "\n";
 
@@ -219,13 +233,14 @@ print more closely resembles perl.
 
 =cut
 sub Print {
-	for (@_) {
-		if ( length($_) > 128000 ) {
-			ASP::Print( unpack('a128000a*', $_) );
-		} else {
-			$main::Response->Write($_);
-		}
-	}
+    for (@_) {
+        if ( length($_) > 128000 ) {
+            ASP::Print( unpack('a128000a*', $_) );
+        }
+        else {
+            $main::Response->Write($_);
+        }
+    }
 }
 
 =head2 DebugPrint LIST
@@ -234,7 +249,9 @@ Output is displayed between HTML comments so the output doesn't
 interfere with page aesthetics.
 
 =cut
-sub DebugPrint { ASP::Print("<!--\n", @_, "\n-->"); }
+sub DebugPrint {
+    ASP::Print("<!--\n", @_, "\n-->");
+}
 
 =head2 HTMLPrint LIST
 
@@ -242,7 +259,11 @@ The same as C<Print> except the output is HTML-encoded so that
 any HTML tags appear as sent, i.e. E<lt> becomes &lt;, E<gt> becomes &gt; etc.
 
 =cut
-sub HTMLPrint { map { ASP::Print($main::Server->HTMLEncode($_)) } @_ ; }
+sub HTMLPrint {
+    map {
+        ASP::Print($main::Server->HTMLEncode($_))
+    } @_ ;
+}
 
 =head2 die LIST
 
@@ -252,10 +273,8 @@ cleanup code you have added with C<AddDeathHook>.
 
 =cut
 sub die {
-	ASP::Print(@_, "</BODY></HTML>");
-	_END;
-	$main::Response->End();
-	CORE::die();
+    ASP::Print(@_, "</BODY></HTML>");
+    ASP::exit();
 }
 
 =head2 exit
@@ -265,68 +284,62 @@ Any cleanup code added with C<AddDeathHook> is also called.
 
 =cut
 sub exit {
-	_END;
-	$main::Response->End();
-	CORE::exit();
+    _END;
+    $main::Response->End();
+    CORE::exit();
 }
 
-=head2 escape LIST
+=head2 escape STRING
 
-Escapes (URL-encodes) a list. Uses ASP object method
+Escapes (URL-encodes) a string. Uses ASP object method
 $Server->URLEncode().
 
 =cut
-sub escape { map { $main::Server->URLEncode($_) } @_; }
+sub escape {
+    my $str = shift;
+    return $main::Server->URLEncode($str);
+}
 
-=head2 unescape LIST
+=head2 unescape STRING
 
-Unescapes a URL-encoded list. Algorithms ripped from CGI.pm
+Unescapes a URL-encoded string. Algorithms ripped from CGI.pm
 method of the same name.
 
 =cut
 sub unescape {
-	map {
-		tr/+/ /;
-		s/%([0-9a-fA-F]{2})/pack("c",hex($1))/ge;
-	} @_;
+    my $str = shift;
+    $str =~ tr/+/ /;
+    $str =~ s/%([0-9a-fA-F]{2})/pack("c",hex($1))/ge;
+    return $str;
 }
 
-=head2 escapeHTML LIST
+=head2 escapeHTML STRING
 
-Escapes a list of HTML. Uses ASP object method $Server->HTMLEncode().
-
-If passed an array reference, escapeHTML will return a reference
-to the escaped array.
+Escapes an HTML string. Uses ASP object method $Server->HTMLEncode().
 
 =cut
 sub escapeHTML {
-	my ($flag, @args) = (0, @_);
-	@args = @{$args[0]} and $flag++ if ref $args[0] eq "ARRAY"; 
-	$_ = $main::Server->HTMLEncode($_) for @args;
-	$flag ? \@args : @args;
+    my $arg = shift;
+    return $main::Server->HTMLEncode($arg);
 }
 
-=head2 unescapeHTML LIST
+=head2 unescapeHTML STRING
 
 Unescapes an HTML-encoded list.
 
-If passed an array reference, unescapeHTML will return a reference
-to the un-escaped array.
-
 =cut
 sub unescapeHTML {
-	my ($flag, @args) = (0, @_);
-	@args = @{$args[0]} and $flag++ if ref $args[0] eq "ARRAY"; 
-	map {
-		s/&amp;/&/gi;
-		s/&quot;/"/gi;
-		s/&nbsp;/ /gi;
-		s/&gt;/>/gi;
-		s/&lt;/</gi;
-		s/&#(\d+);/chr($1)/ge;
-		s/&#x([0-9a-f]+);/chr(hex($1))/gi;
-	} @args;
-	$flag ? \@args : @args;
+    my $arg = shift;
+    for ($arg) {
+        s/&amp;/&/gi;
+        s/&quot;/"/gi;
+        s/&nbsp;/ /gi;
+        s/&gt;/>/gi;
+        s/&lt;/</gi;
+        s/&#(\d+);/chr($1)/ge;
+        s/&#x([0-9a-f]+);/chr(hex($1))/gi;
+    }
+    return $arg;
 }
 
 =head2 param EXPR [, EXPR]
@@ -335,7 +348,7 @@ Simplifies parameter access and makes switch from GET to POST transparent.
 
 Given the following querystring:
 
-	myscript.asp?x=a&x=b&y=c
+    myscript.asp?x=a&x=b&y=c
 
     param()      returns ('x', 'y')
     param('y')   returns 'c'
@@ -349,37 +362,40 @@ property used in this function.
 
 =cut
 sub param {
-	if ($APACHE) {
-		return (wantarray) ? (CGI::param(@_)) : scalar(CGI::param(@_));
-	}
-	unless (@_) {
-		my @keys;
-		push( @keys, $_ ) for ( Win32::OLE::in $main::Request->QueryString );
-		push( @keys, $_ ) for ( Win32::OLE::in $main::Request->Form );
-		return @keys;
-	}
-	$_[1] = 1 unless defined $_[1];
-	unless (wantarray) {
-		if ($main::Request->ServerVariables('REQUEST_METHOD')->Item eq 'GET') {
-			return $main::Request->QueryString($_[0])->Item($_[1]);
-		} else {
-			return $main::Request->Form($_[0])->Item($_[1]);
-		}
-	} else {
-		my ($i, @ret);
-		if ($main::Request->ServerVariables('REQUEST_METHOD')->Item eq 'GET') {
-			my $count = $main::Request->QueryString($_[0])->{Count};
-			for ($i = 1; $i <= $count; $i++ ) {
-				push @ret, $main::Request->QueryString($_[0])->Item($i);
-			}
-		} else {
-			my $count = $main::Request->Form($_[0])->{Count};
-			for ($i = 1; $i <= $count; $i++) {
-				push @ret, $main::Request->Form($_[0])->Item($i);
-			}
-		}
-		return @ret;
-	}
+    if ($APACHE) {
+        return (wantarray) ? (CGI::param(@_)) : scalar(CGI::param(@_));
+    }
+    unless (@_) {
+        my @keys;
+        push( @keys, $_ ) for ( Win32::OLE::in $main::Request->QueryString );
+        push( @keys, $_ ) for ( Win32::OLE::in $main::Request->Form );
+        return @keys;
+    }
+    $_[1] = 1 unless defined $_[1];
+    unless (wantarray) {
+        if ($main::Request->ServerVariables('REQUEST_METHOD')->Item eq 'GET') {
+            return $main::Request->QueryString($_[0])->Item($_[1]);
+        }
+        else {
+            return $main::Request->Form($_[0])->Item($_[1]);
+        }
+    }
+    else {
+        my ($i, @ret);
+        if ($main::Request->ServerVariables('REQUEST_METHOD')->Item eq 'GET') {
+            my $count = $main::Request->QueryString($_[0])->{Count};
+            for ($i = 1; $i <= $count; $i++ ) {
+                push @ret, $main::Request->QueryString($_[0])->Item($i);
+            }
+        }
+        else {
+            my $count = $main::Request->Form($_[0])->{Count};
+            for ($i = 1; $i <= $count; $i++) {
+                push @ret, $main::Request->Form($_[0])->Item($i);
+            }
+        }
+        return @ret;
+    }
 }
 
 =head2 param_count EXPR
@@ -389,11 +405,11 @@ QueryString).
 
 For example, if URL is
 
-	myscript.asp?x=a&x=b&y=c
+    myscript.asp?x=a&x=b&y=c
 
 then
 
-	param_count('x');
+    param_count('x');
 
 returns 2.
 
@@ -401,18 +417,17 @@ NOTE: Under Apache::ASP, param_count() performs some manipulation
 using CGI::param() because Apache::ASP doesn't support the
 $obj->{Count} property used in this function.
 
- 
-
 =cut
 sub param_count {
-	if ($APACHE) {
-		return scalar( @{[ CGI::param($_[0]) ]} );
-	}
-	if ($main::Request->ServerVariables('REQUEST_METHOD')->Item eq 'GET') {
-		return $main::Request->QueryString($_[0])->{Count};
-	} else {
-		return $main::Request->Form($_[0])->{Count};
-	}
+    if ($APACHE) {
+        return scalar( @{[ CGI::param($_[0]) ]} );
+    }
+    if ($main::Request->ServerVariables('REQUEST_METHOD')->Item eq 'GET') {
+        return $main::Request->QueryString($_[0])->{Count};
+    }
+    else {
+        return $main::Request->Form($_[0])->{Count};
+    }
 }
 
 =head2 AddDeathHook LIST
@@ -421,12 +436,12 @@ Allows cleanup code to be executed when you C<die> or C<exit>.
 Useful for closing database connections in the event of a
 fatal error.
 
-	<%
-	my $conn = Win32::OLE-new('ADODB.Connection');
-	$conn->Open("MyDSN");
-	$conn->BeginTrans();
-	ASP::AddDeathHook( sub { $Conn->Close if $Conn; } );
-	%>
+    <%
+    my $conn = Win32::OLE-new('ADODB.Connection');
+    $conn->Open("MyDSN");
+    $conn->BeginTrans();
+    ASP::AddDeathHook( sub { $Conn->Close if $Conn; } );
+    %>
 
 Death hooks are not executed except by explicitly calling the die() or exit()
 methods provided by ASP.pm.
@@ -474,6 +489,15 @@ Tim Hammerquist E<lt>F<tim@dichosoft.com>E<gt>
 =head1 HISTORY
 
 =over 4
+
+=item Version 2
+
+(un)?escape(HTML)? functions were misbehaving. At the moment, they
+accept and return only a single scalar string. This changed the API
+slightly, but they should at least behave in a predictable manner.
+
+Added a two test scripts to be added to distribution. They require a
+running ASP/PerlScript or Apache/mod_perl/Apache::ASP server.
 
 =item Version 1.07
 

@@ -1,4 +1,6 @@
+ASP.pm
 Makefile.PL
 MANIFEST
-ASP.pm
 README
+t/testload.asp
+t/testfunc.asp
